@@ -167,6 +167,9 @@ class BlockDeviceDict(dict):
             raise exception.InvalidBDMFormat(
                 details="Unrecognized legacy format.")
 
+        if legacy_bdm.get('destination_type'):
+            new_bdm['destination_type'] = legacy_bdm.get('destination_type')
+
         return cls(new_bdm, non_computable_fields)
 
     @classmethod

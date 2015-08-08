@@ -224,6 +224,14 @@ get_notifier = functools.partial(rpc.get_notifier, service='compute')
 wrap_exception = functools.partial(exception.wrap_exception,
                                    get_notifier=get_notifier)
 
+try:
+    #get vmthunder volume info
+    #from vmthunder.compute import VMThunderCompute as Client
+    from virtman.compute import Virtman as Client
+    vmtclient = Client()
+except Exception as exc:
+    err_str = _("Ignoring vmthunder failure due to %s")
+    LOG.debug(err_str % exc)
 
 @utils.expects_func_args('migration')
 def errors_out_migration(function):
@@ -1191,6 +1199,7 @@ class ComputeManager(manager.Manager):
                     extra_usage_info=info, fault=fault, **kwargs)
 
         try:
+            start_time = time.time()
             self._prebuild_instance(context, instance)
 
             if request_spec and request_spec.get('image'):
@@ -1207,6 +1216,9 @@ class ComputeManager(manager.Manager):
                     injected_files, admin_password, is_first_time, node,
                     instance, image_meta, legacy_bdm_in_spec)
             notify("end", msg=_("Success"), network_info=network_info)
+            end_time = time.time()
+            LOG.info('%s VMThunder cost time(prebuild~spawn):%s' %
+                     (instance['uuid'], end_time-start_time))
 
         except exception.RescheduledException as e:
             # Instance build encountered an error, and has been rescheduled.
@@ -1685,6 +1697,7 @@ class ComputeManager(manager.Manager):
 
     def _prep_block_device(self, context, instance, bdms):
         """Set up the block device for an instance with error logging."""
+        LOG.info('my Log: context: %s' % str(context))
         try:
             block_device_info = {
                 'root_device_name': instance['root_device_name'],
@@ -1702,7 +1715,12 @@ class ComputeManager(manager.Manager):
                     driver_block_device.attach_block_devices(
                         driver_block_device.convert_images(bdms),
                         context, instance, self.volume_api,
-                        self.driver, self._await_block_device_map_created))
+                        self.driver, self._await_block_device_map_created) +
+                    driver_block_device.attach_block_devices(
+                        driver_block_device.convert_vmthunder(bdms),
+                        context, instance, self.volume_api,
+                        self.driver, self._await_block_device_map_created,
+                        self.conductor_api))
             }
 
             if self.use_legacy_block_device_info:
@@ -1714,6 +1732,7 @@ class ComputeManager(manager.Manager):
             # Get swap out of the list
             block_device_info['swap'] = driver_block_device.get_swap(
                 block_device_info['swap'])
+            LOG.info('my Log: block_device_info:%s' % str(block_device_info))
             return block_device_info
 
         except exception.OverQuota:
@@ -2172,6 +2191,8 @@ class ComputeManager(manager.Manager):
                                                      bdm.volume_id,
                                                      connector)
                 self.volume_api.detach(context, bdm.volume_id)
+                LOG.info("my Log: in DriverVmthunderBlockDevice detach: %s" %
+                         bdm.volume_id)
             except exception.DiskNotFound as exc:
                 LOG.warn(_('Ignoring DiskNotFound: %s') % exc,
                          instance=instance)
@@ -2229,6 +2250,10 @@ class ComputeManager(manager.Manager):
             #             is already in ERROR.
             try:
                 self._cleanup_volumes(context, instance_uuid, bdms)
+                LOG.info("my Log: in DriverVmthunderBlockDevice destroy: %s" %
+                         instance_uuid)
+                if vmtclient:
+                    vmtclient.destroy(instance_uuid)
             except Exception as exc:
                 err_str = _("Ignoring volume cleanup failure due to %s")
                 LOG.warn(err_str % exc, instance=instance)

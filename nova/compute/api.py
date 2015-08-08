@@ -662,7 +662,8 @@ class API(base.Base):
             block_device_mapping += image_defined_bdms
 
         if min_count > 1 or max_count > 1:
-            if any(map(lambda bdm: bdm['source_type'] == 'volume',
+            if any(map(lambda bdm: bdm['source_type'] == 'volume' and
+                       bdm['destination_type'] != 'vmthunder',
                        block_device_mapping)):
                 msg = _('Cannot attach one or more volumes to multiple'
                         ' instances')

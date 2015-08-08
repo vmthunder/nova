@@ -144,7 +144,8 @@ class BlockDeviceMapping(base.NovaPersistentObject, base.NovaObject):
 
     @property
     def is_volume(self):
-        return self.destination_type == 'volume'
+        return self.destination_type == 'volume' or \
+               self.destination_type == 'vmthunder'
 
     @property
     def is_image(self):

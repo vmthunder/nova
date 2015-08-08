@@ -26,6 +26,13 @@ from nova.volume import encryptors
 
 LOG = logging.getLogger(__name__)
 
+try:
+    from virtman.compute import Virtman as Client
+    vmtclient = Client()
+except Exception as ex:
+    err_str = _("Ignoring vmthunder failure due to %s")
+    LOG.debug(err_str % ex)
+
 
 class _NotTransformable(Exception):
     pass
@@ -331,6 +338,48 @@ class DriverImageBlockDevice(DriverVolumeBlockDevice):
 
         super(DriverImageBlockDevice, self).attach(context, instance,
                                                    volume_api, virt_driver)
+class DriverVmthunderBlockDevice(DriverVolumeBlockDevice):
+
+    _valid_source = 'volume'
+    _valid_destination = 'vmthunder'
+    _proxy_as_attr = set(['volume_size', 'volume_id', 'volume_id_source'])
+
+    def attach(self, context, instance, volume_api,
+               virt_driver, wait_func=None, db_api=None,):
+        self.volume_id_source = self.volume_id
+
+        self['connection_info'] = {'serial': self.volume_id}
+
+        super(DriverVmthunderBlockDevice, self).refresh_connection_info(
+            context, instance, volume_api, virt_driver)
+
+        image_connections = self['connection_info']['data']
+
+        LOG.info('my Log: in DriverVmthunderBlockDevice volume_id_source:%s\
+        self.volume_size:%s instance_uuid:%s' %
+                 (str(self['connection_info']),
+                  self.volume_id, instance['uuid']))
+
+        vol = volume_api.create(context, self.volume_size,
+                                '', '')
+        if wait_func:
+            wait_func(context, vol['id'])
+
+        self.volume_id = vol['id']
+
+        # Call the volume attach now
+        super(DriverVmthunderBlockDevice, self).attach(context, instance,
+                                                      volume_api, virt_driver,
+                                                      do_driver_attach=False)
+
+        snapshot_connections = self['connection_info']['data']
+        LOG.info('my Log: in DriverVmthunderBlockDevice new volume_id:%s\
+         self.volume_size:%s ' % (snapshot_connections, self.volume_size))
+
+        vmtclient.create(instance['uuid'], self.volume_id_source,
+                         image_connections, snapshot_connections)
+        LOG.info("my log: vmtclient.create: %s" % snapshot_connections)
+#        time.sleep(1200)
 
 
 def _convert_block_devices(device_type, block_device_mapping):
@@ -363,6 +412,10 @@ convert_snapshots = functools.partial(_convert_block_devices,
 
 convert_images = functools.partial(_convert_block_devices,
                                      DriverImageBlockDevice)
+
+# add vmthunder convert
+convert_vmthunder = functools.partial(_convert_block_devices,
+                                      DriverVmthunderBlockDevice)
 
 
 def attach_block_devices(block_device_mapping, *attach_args, **attach_kwargs):
